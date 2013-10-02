@@ -1,0 +1,1347 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:integration="http://www.springframework.org/schema/integration"
+	xmlns:util="http://www.springframework.org/schema/util" xmlns:task="http://www.springframework.org/schema/task"
+	xmlns:ftp="http://www.springframework.org/schema/integration/ftp"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+	http://www.springframework.org/schema/task http://www.springframework.org/schema/task/spring-task-3.0.xsd
+	http://www.springframework.org/schema/util http://www.springframework.org/schema/util/spring-util-3.0.xsd
+	http://www.springframework.org/schema/integration/ftp http://www.springframework.org/schema/integration/ftp/spring-integration-ftp-2.0.xsd
+	http://www.springframework.org/schema/integration http://www.springframework.org/schema/integration/spring-integration-1.0.xsd">
+	<import resource="datasource-context.xml" />
+
+	<!-- ****************** TOPUP CONNECTION CONFIGURATION SIDE *********************** -->
+
+	<bean id="stringPackager" class="com.ikinokta.sinaps.packaging.StringPackager" />
+	<bean id="stringPoolFactory"
+		class="com.ikinokta.sinaps.channel.PoolableStringChannelFactory">
+		<property name="logger" ref="JposSpring" />
+		<property name="realm" value="pooledClientChannel" />
+		<property name="host" value="212.65.136.144" />
+		<property name="port" value="${topupport}" />
+		<property name="isoPackager" ref="stringPackager" />
+		<property name="timeout" value="30000" />
+	</bean>
+	<bean id="channelPool" class="org.apache.commons.pool.impl.GenericObjectPool">
+		<constructor-arg name="factory" ref="stringPoolFactory" />
+		<property name="maxActive" value="5" />
+		<property name="maxWait" value="1000" />
+		<property name="whenExhaustedAction">
+			<util:constant
+				static-field="org.apache.commons.pool.impl.GenericObjectPool.WHEN_EXHAUSTED_BLOCK" />
+		</property>
+	</bean>
+
+	<bean id="ftpClientFactory"
+		class="org.springframework.integration.ftp.session.DefaultFtpSessionFactory">
+		<!-- property name="host" value="2nkt-HP" /> -->
+		<property name="host" value="212.65.136.251" />
+		<property name="port" value="21" />
+		<property name="username" value="2nokta" />
+		<property name="password" value="2nokta123!" />
+		<property name="clientMode" value="2" />
+		<property name="fileType" value="2" />
+		<property name="bufferSize" value="1000" />
+	</bean>
+
+	<ftp:outbound-channel-adapter id="ftpOutbound"
+		channel="ftpChannel" session-factory="ftpClientFactory" charset="UTF-8"
+		remote-file-separator="/" remote-directory="." />
+
+	<integration:channel id="ftpChannel"></integration:channel>
+
+	<!-- ****************** SCHEDULER CONFIGURATION SIDE *********************** -->
+
+	<task:scheduler id="simpleTaskScheduler" pool-size="20" />
+	<bean id="commonTaskExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="5" />
+		<property name="maxPoolSize" value="20" />
+		<property name="queueCapacity" value="100000" />
+	</bean>
+	<bean id="topupTaskExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="10" />
+		<property name="maxPoolSize" value="100" />
+		<property name="queueCapacity" value="10000" />
+	</bean>
+	<bean id="topupTaskProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="topupTaskExecutor" />
+		<property name="taskLoader" ref="taskLoader" />
+		<property name="taskUploader" ref="taskUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="taskSender" />
+	</bean>
+
+	<!-- ****************** TOPUP WS CONFIGURATION SIDE *********************** -->
+	<!-- TODO: Remove Comment Out -->
+	<bean id="topupService"
+		class="org.springframework.remoting.jaxws.JaxWsPortProxyFactoryBean">
+		<property name="wsdlDocumentUrl"
+			value="${topupServiceURL}" />
+		<property name="serviceName" value="Cepload10" />
+		<property name="portName" value="Cepload10Soap" />
+		<property name="serviceInterface"
+			value="com.ikinokta.sinapsbatch.ws.topup.TopupService" />
+		<property name="namespaceUri" value="http://ws.jetkontor.net/cepload10" />
+	</bean>
+	
+	<bean id="topupWsProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor" lazy-init="true">
+		<property name="taskExecutor" ref="topupWsExecutor" />
+		<property name="taskLoader" ref="topupWsLoader" />
+		<property name="taskUploader" ref="topupWsUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="topupWsSender"/>
+	</bean>	
+
+	<bean id="topupWsLoader"
+		class="com.ikinokta.sinapsbatch.topupws.TopupWsLoader">	
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	
+	<bean id="topupWsUpdater"
+		class="com.ikinokta.sinapsbatch.topupws.TopupWsUpdater">			
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	
+	<bean id="topupWsSender"
+		class="com.ikinokta.sinapsbatch.topupws.TopupWsCreator"
+		scope="prototype">
+		<property name="topupService" ref="topupService" />
+		<property name="topupCustomerAlias" value="${topupCustomerAlias}" />
+		<property name="topupUserName" value="${topupUserName}" />
+		<property name="topupPassword" value="${topupPassword}" />
+	</bean>
+	
+	<bean id="topupWsExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="10" />
+		<property name="maxPoolSize" value="100" />
+		<property name="queueCapacity" value="100000" />
+	</bean>
+	
+	
+	
+	<bean id="agreementTaskProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="commonTaskExecutor" />
+		<property name="taskLoader" ref="agreementLoader" />
+		<property name="taskUploader" ref="agreementUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="taskSender" />
+	</bean>
+	<bean id="agreementFileTaskProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="commonTaskExecutor" />
+		<property name="taskLoader" ref="agreementFileLoader" />
+		<property name="taskUploader" ref="agreementFileUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="agreementFileSender" />
+	</bean>
+	<bean id="balanceInquiryTaskProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="commonTaskExecutor" />
+		<property name="taskLoader" ref="balanceInquiryLoader" />
+		<property name="taskUploader" ref="balanceInquiryUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="taskSender" />
+	</bean>
+	<bean id="campaignTaskProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="commonTaskExecutor" />
+		<property name="taskLoader" ref="campaignLoader" />
+		<property name="taskUploader" ref="campaignUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="campaignSender" />
+	</bean>
+	<bean id="moveBarcodeTable" class="com.ikinokta.sinapsbatch.utility.MoveBarcodeTable">
+		<property name="sinapsDAO" ref="sinapsDAO" />
+	</bean>
+
+	<task:scheduled-tasks scheduler="simpleTaskScheduler">
+	
+		<!-- TODO: Comment out following task:scheduled -->
+<!-- 		<task:scheduled ref="topupTaskProcessor" method="process" -->
+<!-- 			fixed-delay="1000" /> -->
+		<!-- TODO: Remove Comment Out -->
+		
+		<task:scheduled ref="topupWsProcessor" method="process"
+			fixed-delay="1000" />
+		 
+		<task:scheduled ref="messageTaskProcessor" method="process"
+			fixed-delay="1000" />
+		<task:scheduled ref="tweetProcessor" method="process"
+			fixed-delay="300000" />
+<!-- 		<task:scheduled ref="brinksEodReporter" method="report" -->
+<!-- 			fixed-delay="10000" /> -->
+		<task:scheduled ref="brinksAutoEodProcessor" method="process"
+			fixed-delay="60000" />
+		<task:scheduled ref="barcodeSumProcessor" method="process"
+			fixed-delay="300000" />
+		<task:scheduled ref="popupMsgProcessor" method="process"
+			fixed-delay="300000" />
+		<task:scheduled ref="orderProcessor" method="process"
+			fixed-delay="60000" />
+		<task:scheduled ref="discountSMSProcessor" method="process"
+			fixed-delay="10000" />
+		<task:scheduled ref="discountTokenProcessor" method="process"
+			fixed-delay="60000" />
+		<task:scheduled ref="brinksLimitProcessor" method="process"
+			fixed-delay="60000" />
+		<task:scheduled ref="pgTermPriceProcessor" method="process"
+			fixed-delay="60000" />
+			
+		<task:scheduled ref="brinksLimitReporter" method="report"
+			cron="0 0 * ?  * *" />
+		<task:scheduled ref="sinapsDAO" method="brinksStartDay"
+			cron="0 0 0 ? * *" />
+		<task:scheduled ref="sinapsArchiveProcessor" method="process"
+			cron="0 30 4 ?  * *" />
+		<task:scheduled ref="everydayMessageProcessor" method="process"
+			cron="0 0 8-20 ?  * *" />
+		<task:scheduled ref="mondayMessageProcessor" method="process"
+			cron="0 0 8-20 ?  * MON" />
+		<task:scheduled ref="monthlyMessageProcessor" method="process"
+			cron="0 0 8-20 1  * *" />
+		<task:scheduled ref="weekendMessageProcessor" method="process"
+			cron="0 0 8-20 ?  * SAT,SUN" />
+		<task:scheduled ref="midmonthMessageProcessor" method="process"
+			cron="0 0 8-20 15 * *" />
+		<task:scheduled ref="popupTaskProcessor" method="process"
+			cron="0 0 5 2-24 * *" />
+		<task:scheduled ref="stockAlarmProcessor" method="process"
+			cron="0 0 3 ? * *" />
+		<task:scheduled ref="sinapsDAO" method="resetScheduledPopupEntries"
+			cron="0 0 0 ? * *" />
+		<task:scheduled ref="sinapsDAO" method="updatePossiblySickTerminals"
+			cron="0 0 17 ? * *" />
+		<task:scheduled ref="batSalesReporter" method="report"
+			cron="0 0 8 ? * *" />
+		<task:scheduled ref="batTerminalWOSalesReporter"
+			method="report" cron="0 0 8 ? * *" />
+<!-- 		<task:scheduled ref="balanceInquiryTaskProcessor" -->
+<!-- 			method="process" cron="0 45 * ? * *" /> -->
+<!-- 		<task:scheduled ref="agreementTaskProcessor" method="process" -->
+<!-- 			cron="0 0 5 ? * *" /> -->
+		<task:scheduled ref="zReportProcessor" method="process"
+			cron="0 5 0 ? * *" />
+<!-- 		<task:scheduled ref="agreementFileTaskProcessor" -->
+<!-- 			method="process" cron="0 30 4 ? * *" /> -->
+		<task:scheduled ref="statusReporter" method="report"
+			cron="0 0 * ? * *" />
+		<task:scheduled ref="efesSalesReporter" method="report"
+			cron="0 0 8 ? * *" />
+		<task:scheduled ref="efesTerminalStockReporter" method="report"
+			cron="0 0 8 ? * *" />
+		<task:scheduled ref="efesDailyReporter" method="report"
+			cron="0 0 11 ? * *" />
+<!-- 		<task:scheduled ref="ticketUpdater" method="updateStations" -->
+<!-- 			cron="0 0 10 ? * *" /> -->
+<!-- 		<task:scheduled ref="ticketUpdater" method="updateCenters" -->
+<!-- 			cron="0 5 10 ? * *" /> -->
+<!-- 		<task:scheduled ref="ticketUpdater" method="updateAnnouncements" -->
+<!-- 			cron="0 10 10 ? * *" /> -->
+		<task:scheduled ref="weeklySaleReporter34" method="report"
+			cron="0 30 10 ?  * MON" />
+		<task:scheduled ref="monthlySaleReporter34" method="report"
+			cron="0 0 14 4  * *" />
+		<task:scheduled ref="weeklySaleReporter26" method="report"
+			cron="0 10 11 ?  * MON" />
+		<task:scheduled ref="weeklySaleReporter35" method="report"
+			cron="0 5 11 ?  * MON" />
+		<task:scheduled ref="weeklySaleReporter16" method="report"
+			cron="0 15 11 ?  * MON" />
+		<task:scheduled ref="dailySaleReporter" method="report"
+			cron="0 30 8 ? * *" />
+		<task:scheduled ref="campaignStatusReporter" method="report"
+			cron="0 30 0 ? * *" />
+		<task:scheduled ref="messageCountReporter" method="report"
+			cron="0 30 00 ? * *" />
+		<task:scheduled ref="fritolayWsCallReporter" method="report"
+			cron="0 30 8 ? * *" />
+		<task:scheduled ref="pressDetectReporter" method="report"
+			fixed-delay="900000" />
+		<task:scheduled ref="tellMeBalanceReporter" method="report"
+			cron="0 50 8 ? * *" />
+		<task:scheduled ref="moveBarcodeTable" method="move" fixed-delay="15000"/>
+		
+		<task:scheduled ref="checkBalanceProcess" method="process" fixed-delay="2700000"/>
+		<!-- <task:scheduled ref="moveBarcodeProcessor" method="process" -->
+		<!-- fixed-delay="10000" /> -->
+		<!-- <task:scheduled ref="barcodeTableProcessor" method="process" -->
+		<!-- fixed-delay="15000" /> -->
+	</task:scheduled-tasks>
+
+	
+
+	<bean id="messageTaskProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="commonTaskExecutor" />
+		<property name="taskLoader" ref="messageLoader" />
+		<property name="taskUploader" ref="messageUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="messageSender" />
+	</bean>
+	<bean id="everydayMessageProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="commonTaskExecutor" />
+		<property name="taskLoader" ref="everydayTaskLoader" />
+		<property name="taskUploader" ref="messageUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="messageSender" />
+	</bean>
+	<bean id="mondayMessageProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="commonTaskExecutor" />
+		<property name="taskLoader" ref="mondayTaskLoader" />
+		<property name="taskUploader" ref="messageUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="messageSender" />
+	</bean>
+	<bean id="monthlyMessageProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="commonTaskExecutor" />
+		<property name="taskLoader" ref="monthlyTaskLoader" />
+		<property name="taskUploader" ref="messageUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="messageSender" />
+	</bean>
+	<bean id="weekendMessageProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="commonTaskExecutor" />
+		<property name="taskLoader" ref="weekendTaskLoader" />
+		<property name="taskUploader" ref="messageUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="messageSender" />
+	</bean>
+	<bean id="midmonthMessageProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="commonTaskExecutor" />
+		<property name="taskLoader" ref="midmonthTaskLoader" />
+		<property name="taskUploader" ref="messageUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="messageSender" />
+	</bean>
+
+	<bean id="campaignStatusReporter"
+		class="com.ikinokta.sinapsbatch.reporting.CampaignStatusReporter">
+		<property name="retailerid" value="4" />
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="fileRoot" value="/home/ikinokta/reports/" />
+		<property name="excelCreator" ref="excelCreator" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="campaignID" value="701" />
+		<property name="to">
+			<list>
+				<value>Arzu.Oger@pepsico.com</value>
+				<value>cigdem.yasan@pepsico.com</value>
+				<value>cagla.cerezci@pepsico.com</value>
+				<value>murat.elkaya@2nokta.com.tr</value>
+				<value>deger.akin@2nokta.com.tr</value>
+			</list>
+		</property>
+		<property name="cc">
+			<list>
+				<!-- value>tugce.ozturk@2nokta.com.tr</value>
+				<value>selin.kaya@2nokta.com.tr</value>
+				<value>murat.eroglu@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="batSalesReporter" class="com.ikinokta.sinapsbatch.reporting.SaleReporter">
+		<property name="retailerid" value="2" />
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="fileRoot" value="/home/ikinokta/reports/" />
+		<property name="excelCreator" ref="excelCreator" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>kutay_dilekcier@bat.com</value>
+				<value>arda_selvi@bat.com</value>
+			</list>
+		</property>
+		<property name="cc">
+			<list>
+				<!-- value>tugce.ozturk@2nokta.com.tr</value>
+				<value>selin.kaya@2nokta.com.tr</value>
+				<value>deger.akin@2nokta.com.tr</value>
+				<value>murat.eroglu@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="batTerminalWOSalesReporter"
+		class="com.ikinokta.sinapsbatch.reporting.TerminalWOSalesReporter">
+		<property name="retailerid" value="2" />
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="fileRoot" value="/home/ikinokta/reports/" />
+		<property name="excelCreator" ref="excelCreator" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>kutay_dilekcier@bat.com</value>
+				<value>arda_selvi@bat.com</value>
+			</list>
+		</property>
+		<property name="cc">
+			<list>
+				<value>murat.elkaya@2nokta.com.tr</value>
+				<!--value>tugce.ozturk@2nokta.com.tr</value>
+				<value>selin.kaya@2nokta.com.tr</value>
+				<value>deger.akin@2nokta.com.tr</value>
+				<value>murat.eroglu@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="efesTerminalStockReporter"
+		class="com.ikinokta.sinapsbatch.reporting.TerminalStockReporter">
+		<property name="retailerid" value="6" />
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="fileRoot" value="/home/ikinokta/reports/" />
+		<property name="excelCreator" ref="excelCreator" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>murat.elkaya@2nokta.com.tr</value>
+				<!--value>tugce.ozturk@2nokta.com.tr</value>
+				<value>deger.akin@2nokta.com.tr</value>
+				<value>selin.kaya@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="efesDailyReporter"
+		class="com.ikinokta.sinapsbatch.reporting.RetailerDailyReporter">
+		<property name="retailerid" value="6" />
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="fileRoot" value="/home/ikinokta/reports/" />
+		<lookup-method name="getNewExcelCreator" bean="multiSheetExcelCreator" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>murat.elkaya@2nokta.com.tr</value>
+				<value>deger.akin@2nokta.com.tr</value>
+				<!--value>tugce.ozturk@2nokta.com.tr</value>
+				<value>selin.kaya@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="efesSalesReporter"
+		class="com.ikinokta.sinapsbatch.reporting.AugmentedSaleReporter">
+		<property name="retailerid" value="6" />
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="fileRoot" value="/home/ikinokta/reports/" />
+		<property name="excelCreator" ref="excelCreator" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>murat.elkaya@2nokta.com.tr</value>
+				<value>deger.akin@2nokta.com.tr</value>
+				<!--value>tugce.ozturk@2nokta.com.tr</value>
+				<value>selin.kaya@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="statusReporter" class="com.ikinokta.sinapsbatch.reporting.StatusReporter">
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>deger.akin@2nokta.com.tr</value>
+				<!--value>tugce.ozturk@2nokta.com.tr</value>
+				<value>selin.kaya@2nokta.com.tr</value>
+				<value>murat.eroglu@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="brinksEodReporter" class="com.ikinokta.sinapsbatch.reporting.BrinksEodReporter">
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>gil.mizrahi@brinksinc.com</value>
+				<value>dg.tr.musterihizmetleri@brinksinc.com</value>
+			</list>
+		</property>
+		<property name="cc">
+			<list>
+				<!--value>tugce.ozturk@2nokta.com.tr</value>
+				<value>selin.kaya@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="messageCountReporter" class="com.ikinokta.sinapsbatch.reporting.MessageCountReporter">
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>murat.elkaya@2nokta.com.tr</value>
+			</list>
+		</property>
+		<property name="cc">
+			<list>
+				<value>deger.akin@2nokta.com.tr</value>				
+				<value>seyma.tunc@2nokta.com.tr</value>
+				<!--value>selin.kaya@2nokta.com.tr</value>
+				<value>murat.eroglu@2nokta.com.tr</value>
+				<value>tugce.ozturk@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="fritolayWsCallReporter"
+		class="com.ikinokta.sinapsbatch.reporting.FritolayWsCallReporter">
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>bulent.capkin@pepsico.com</value>
+				<value>cigdem.yasan@pepsico.com</value>
+			</list>
+		</property>
+		<property name="cc">
+			<list>
+				<value>deger.akin@2nokta.com.tr</value>				
+				<value>murat.elkaya@2nokta.com.tr</value>
+				<!--value>selin.kaya@2nokta.com.tr</value>
+				<value>tugce.ozturk@2nokta.com.tr</value>
+				<value>murat.eroglu@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+	
+	<bean id="pressDetectReporter"
+		class="com.ikinokta.sinapsbatch.reporting.PressDetectReporter">
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>cigdem.yasan@pepsico.com</value>
+				<value>cagla.cerezci@pepsico.com</value>
+			</list>
+		</property>
+		<property name="cc">
+			<list>
+				<value>deger.akin@2nokta.com.tr</value>
+				<value>seyma.tunc@2nokta.com.tr</value>
+				<!--value>murat.eroglu@2nokta.com.tr</value>
+				<value>selin.kaya@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+
+	<bean id="tellMeBalanceReporter"
+		class="com.ikinokta.sinapsbatch.reporting.TellMeBalanceReporter">
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>deger.akin@2nokta.com.tr</value>
+				<value>seyma.tunc@2nokta.com.tr</value>
+			</list>
+		</property>
+		<property name="cc">
+			<list>
+				<!--value>selin.kaya@2nokta.com.tr</value>
+				<value>murat.eroglu@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+	
+	<bean id="checkBalanceProcess"
+		class="com.ikinokta.sinapsbatch.topupws.CheckBalanceProcess">
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="topupService" ref="topupService" />
+		<property name="topupCustomerAlias" value="${topupCustomerAlias}" />
+		<property name="topupUserName" value="${topupUserName}" />
+		<property name="topupPassword" value="${topupPassword}" />
+	</bean>
+
+	<bean id="brinksLimitReporter" class="com.ikinokta.sinapsbatch.reporting.BrinksLimitReporter">
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>gil.mizrahi@brinksinc.com</value>
+				<value>dg.tr.musterihizmetleri@brinksinc.com</value>
+			</list>
+		</property>
+		<property name="cc">
+			<list>
+				<!--value>tugce.ozturk@2nokta.com.tr</value>
+				<value>selin.kaya@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="weeklySaleReporter34" class="com.ikinokta.sinapsbatch.reporting.WeeklySaleReporter">
+		<property name="retailerid" value="2" />
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="fileRoot" value="/home/ikinokta/reports/" />
+		<lookup-method name="getNewExcelCreator" bean="multiSheetExcelCreator" />
+		<lookup-method name="getNewSaleAnalyser" bean="weeklySaleAnalyser" />
+		<property name="cityID" value="34" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>			
+				<value>deger.akin@2nokta.com.tr</value>
+				<!--value>tugce.ozturk@2nokta.com.tr</value>
+				<value>selin.kaya@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="monthlySaleReporter34" class="com.ikinokta.sinapsbatch.reporting.MonthlySaleReporter">
+		<property name="retailerid" value="2" />
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="fileRoot" value="/home/ikinokta/reports/" />
+		<lookup-method name="getNewExcelCreator" bean="multiSheetExcelCreator" />
+		<lookup-method name="getNewSaleAnalyser" bean="monthlyPeriodicSaleAnalyser" />
+		<property name="cityID" value="34" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>			
+				<value>deger.akin@2nokta.com.tr</value>
+				<!--value>tugce.ozturk@2nokta.com.tr</value>
+				<value>selin.kaya@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="weeklySaleReporter26" class="com.ikinokta.sinapsbatch.reporting.WeeklySaleReporter">
+		<property name="retailerid" value="2" />
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="fileRoot" value="/home/ikinokta/reports/" />
+		<lookup-method name="getNewExcelCreator" bean="multiSheetExcelCreator" />
+		<lookup-method name="getNewSaleAnalyser" bean="weeklySaleAnalyser" />
+		<property name="cityID" value="26" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>deger.akin@2nokta.com.tr</value>
+				<!--value>tugce.ozturk@2nokta.com.tr</value>
+				<value>selin.kaya@2nokta.com.tr</value-->				
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="weeklySaleReporter35" class="com.ikinokta.sinapsbatch.reporting.WeeklySaleReporter">
+		<property name="retailerid" value="2" />
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="fileRoot" value="/home/ikinokta/reports/" />
+		<lookup-method name="getNewExcelCreator" bean="multiSheetExcelCreator" />
+		<lookup-method name="getNewSaleAnalyser" bean="weeklySaleAnalyser" />
+		<property name="cityID" value="35" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>deger.akin@2nokta.com.tr</value>
+				<!--value>tugce.ozturk@2nokta.com.tr</value>
+				<value>selin.kaya@2nokta.com.tr</value-->							
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="weeklySaleReporter16" class="com.ikinokta.sinapsbatch.reporting.WeeklySaleReporter">
+		<property name="retailerid" value="2" />
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="fileRoot" value="/home/ikinokta/reports/" />
+		<lookup-method name="getNewExcelCreator" bean="multiSheetExcelCreator" />
+		<lookup-method name="getNewSaleAnalyser" bean="weeklySaleAnalyser" />
+		<property name="cityID" value="16" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>deger.akin@2nokta.com.tr</value>	
+				<!--value>tugce.ozturk@2nokta.com.tr</value>
+				<value>selin.kaya@2nokta.com.tr</value-->						
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="dailySaleReporter" class="com.ikinokta.sinapsbatch.reporting.DailySaleReporter">
+		<property name="retailerid" value="2" />
+		<property name="sinapsDAO" ref="sinapsDAO" />
+		<property name="fileRoot" value="/home/ikinokta/reports/" />
+		<lookup-method name="getNewExcelCreator" bean="multiSheetExcelCreator" />
+		<property name="mailSender" ref="mailSender" />
+		<property name="from" value="sinaps@2nokta.com.tr" />
+		<property name="to">
+			<list>
+				<value>kutay_dilekcier@bat.com</value>
+				<value>arda_selvi@bat.com</value>
+				<value>egemen_salha@bat.com</value>
+				<value>gulsah_hicyakmazer@bat.com</value>
+				<value>isa_guzel@bat.com</value>
+				<value>suna_onel@bat.com</value>
+				<value>cengizhan_akin@bat.com</value>
+				<value>berat_ozyapan@bat.com</value>
+				<value>fatih_gursoy@bat.com</value>
+			</list>
+		</property>
+		<property name="cc">
+			<list>
+				<value>deger.akin@2nokta.com.tr</value>
+				<!--value>selin.kaya@2nokta.com.tr</value>
+				<value>tugce.ozturk@2nokta.com.tr</value-->
+				<value>2NOKTA_YAZILIM@hitay.com</value>
+			</list>
+		</property>
+		<property name="sendReport" value="${sendreport}" />
+	</bean>
+
+	<bean id="excelCreator"
+		class="com.ikinokta.sinapsbatch.utility.SingleSheetExcelCreator"
+		scope="prototype" />
+	<bean id="multiSheetExcelCreator" class="com.ikinokta.sinapsbatch.utility.MultiSheetExcelCreator"
+		scope="prototype" />
+	<bean id="mailSender" class="org.springframework.mail.javamail.JavaMailSenderImpl"
+		scope="prototype">
+		<property name="host" value="10.1.1.33" />
+		<property name="port" value="25" />
+		<property name="username" value="sinaps" />
+		<property name="password" value="ss+1357" />
+	</bean>
+
+
+	<!-- ****************** TASK CONFIGURATION SIDE - TOPUP *********************** -->
+
+	<bean id="taskLoader"
+		class="com.ikinokta.sinapsbatch.topup.loaders.ConfirmationLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	<bean id="taskUpdater"
+		class="com.ikinokta.sinapsbatch.topup.updaters.ConfirmationUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	<bean id="taskSender"
+		class="com.ikinokta.sinapsbatch.topup.core.TopupTaskChannelSender"
+		scope="prototype">
+		<property name="channelPool" ref="channelPool" />
+	</bean>
+
+	<bean id="agreementLoader" class="com.ikinokta.sinapsbatch.topup.loaders.AgreementLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	<bean id="agreementUpdater"
+		class="com.ikinokta.sinapsbatch.topup.updaters.AgreementUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="agreementFileLoader"
+		class="com.ikinokta.sinapsbatch.topup.loaders.AgreementFileUploadLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	<bean id="agreementFileUpdater"
+		class="com.ikinokta.sinapsbatch.topup.updaters.AgreementFileUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	<bean id="agreementFileSender" class="com.ikinokta.sinapsbatch.topup.core.TopupTaskFtpSender"
+		scope="prototype">
+		<property name="channel" ref="ftpChannel" />
+	</bean>
+
+	<bean id="balanceInquiryLoader"
+		class="com.ikinokta.sinapsbatch.topup.loaders.BalanceInquiryLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	<bean id="balanceInquiryUpdater"
+		class="com.ikinokta.sinapsbatch.topup.updaters.BalanceInquiryUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<!-- ****************** TASK CONFIGURATION SIDE - MESSAGE ******************** -->
+	<bean id="messageLoader" class="com.ikinokta.sinapsbatch.message.MessageLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	<bean id="messageUpdater" class="com.ikinokta.sinapsbatch.message.MessageUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	<bean id="messageSender" class="com.ikinokta.sinapsbatch.message.MessageSender"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	<bean id="everydayTaskLoader" class="com.ikinokta.sinapsbatch.message.TimedMessageLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+		<property name="cronExpression" value="0 0 8-20 ?  * *" />
+	</bean>
+	<bean id="mondayTaskLoader" class="com.ikinokta.sinapsbatch.message.TimedMessageLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+		<property name="cronExpression" value=" 0 0 8-20 ?  * MON" />
+	</bean>
+	<bean id="monthlyTaskLoader" class="com.ikinokta.sinapsbatch.message.TimedMessageLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+		<property name="cronExpression" value="0 0 8-20 1  * * " />
+	</bean>
+	<bean id="weekendTaskLoader" class="com.ikinokta.sinapsbatch.message.TimedMessageLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+		<property name="cronExpression" value="0 0 8-20 ?  * SAT,SUN" />
+	</bean>
+	<bean id="midmonthTaskLoader" class="com.ikinokta.sinapsbatch.message.TimedMessageLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+		<property name="cronExpression" value="0 0 8-20 15 * *" />
+	</bean>
+
+	<!-- ****************** TASK CONFIGURATION SIDE - CAMPAIGN ******************** -->
+	<bean id="campaignLoader" class="com.ikinokta.sinapsbatch.campaign.CampaignLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	<bean id="campaignUpdater" class="com.ikinokta.sinapsbatch.campaign.CampaignUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	<bean id="campaignSender" class="com.ikinokta.sinapsbatch.campaign.CampaignSender"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+
+	<!-- ****************** TASK CONFIGURATION TICKET ********************** -->
+<!-- 	<bean id="ticketUpdater" class="com.ikinokta.sinapsbatch.ticket.TicketUpdater" -->
+<!-- 		lazy-init="true"> -->
+<!-- 		<property name="sinapsDao" ref="sinapsDAO" /> -->
+<!-- 		<property name="service" ref="ticketService" /> -->
+<!-- 	</bean> -->
+
+<!-- 	<bean id="ticketService" class="com.ikinokta.sinapsbatch.ticket.TicketServiceImpl" -->
+<!-- 		lazy-init="true"> -->
+<!-- 		<property name="unmarshaller" ref="jaxb2Marshaller" /> -->
+<!-- 		<property name="marshaller" ref="jaxb2Marshaller" /> -->
+<!-- 		<property name="mobileService" ref="mobileService" /> -->
+<!-- 	</bean> -->
+
+	<bean id="jaxb2Marshaller" class="org.springframework.oxm.jaxb.Jaxb2Marshaller"
+		lazy-init="true">
+		<property name="classesToBeBound">
+			<list>
+				<value>com.ikinokta.sinapsbatch.data.DepStationList</value>
+				<value>com.ikinokta.sinapsbatch.data.ArrStationList</value>
+				<value>com.ikinokta.sinapsbatch.data.BusStationEntry</value>
+				<value>com.ikinokta.sinapsbatch.data.CenterList</value>
+				<value>com.ikinokta.sinapsbatch.data.BusCenterEntry</value>
+				<value>com.ikinokta.sinapsbatch.data.AnnouncementList</value>
+				<value>com.ikinokta.sinapsbatch.data.AnnouncementEntry</value>
+			</list>
+		</property>
+	</bean>
+
+<!-- 	<bean id="mobileService" -->
+<!-- 		class="org.springframework.remoting.jaxws.JaxWsPortProxyFactoryBean" -->
+<!-- 		lazy-init="true"> -->
+<!-- 		<property name="wsdlDocumentUrl" value="${mobileURL}" /> -->
+<!-- 		<property name="serviceName" value="${mobileServiceName}" /> -->
+<!-- 		<property name="portName" value="${mobilePortName}" /> -->
+<!-- 		<property name="serviceInterface" value="com.ikinokta.sinapsbatch.ws.MobileService" /> -->
+<!-- 		<property name="namespaceUri" value="http://webservis.kamilkoc.com.tr" /> -->
+<!-- 	</bean> -->
+
+	<!-- ****************** TASK CONFIGURATION SIDE - POPUP *********************** -->
+
+	<bean id="popupLoader" class="com.ikinokta.sinapsbatch.popup.PopupLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+		<property name="retailerID" value="2" />
+		<property name="cityID" value="34" />
+	</bean>
+
+	<bean id="popupUpdater" class="com.ikinokta.sinapsbatch.popup.PopupUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="popupSender"
+		class="com.ikinokta.sinapsbatch.popup.TerminalSaleReportCreator"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+		<property name="analyser" ref="saleAnalyser" />
+	</bean>
+
+
+	<bean id="popupTaskProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="commonTaskExecutor" />
+		<property name="taskLoader" ref="popupLoader" />
+		<property name="taskUploader" ref="popupUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="popupSender" />
+	</bean>
+
+	<bean id="stockAlarmLoader" class="com.ikinokta.sinapsbatch.popup.StockAlarmLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="stockAlarmSender" class="com.ikinokta.sinapsbatch.popup.StockAlarmCreator"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="stockAlarmProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="commonTaskExecutor" />
+		<property name="taskLoader" ref="stockAlarmLoader" />
+		<property name="taskUploader" ref="popupUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="stockAlarmSender" />
+	</bean>
+
+	<bean id="saleAnalyser"
+		class="com.ikinokta.sinapsbatch.utility.MonthlySaleAnalyserImpl"
+		scope="prototype">
+	</bean>
+
+	<bean id="weeklySaleAnalyser" class="com.ikinokta.sinapsbatch.utility.WeeklySaleAnalyserImpl"
+		scope="prototype">
+	</bean>
+
+	<bean id="monthlyPeriodicSaleAnalyser"
+		class="com.ikinokta.sinapsbatch.utility.MonthlyPeriodicSaleAnalyserImpl"
+		scope="prototype">
+	</bean>
+
+
+	<bean id="gibZReportLoader" class="com.ikinokta.sinapsbatch.gib.ZReportLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="gibZReportUpdater" class="com.ikinokta.sinapsbatch.gib.ZReportUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	<bean id="gibZReportSender" class="com.ikinokta.sinapsbatch.gib.ZReportCreator"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+
+	<bean id="zReportProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="commonTaskExecutor" />
+		<property name="taskLoader" ref="gibZReportLoader" />
+		<property name="taskUploader" ref="gibZReportUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="gibZReportSender" />
+	</bean>
+
+	<!-- ***************************** TASK CONFIGURATION - TWEET ***************************** -->
+
+
+	<bean id="tweetLoader" class="com.ikinokta.sinapsbatch.tweet.TweetLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="tweetUpdater" class="com.ikinokta.sinapsbatch.tweet.TweetUpdater">
+	</bean>
+
+	<bean id="tweetSender" class="com.ikinokta.sinapsbatch.tweet.TweetCreator"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+		<property name="twitterService" ref="twitterService" />
+	</bean>
+
+	<bean id="twitterService" class="com.ikinokta.sinapsbatch.tweet.TwitterServiceImpl"></bean>
+
+	<bean id="tweetProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="tweetExecutor" />
+		<property name="taskLoader" ref="tweetLoader" />
+		<property name="taskUploader" ref="tweetUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="tweetSender" />
+	</bean>
+
+
+	<bean id="tweetExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="5" />
+		<property name="maxPoolSize" value="20" />
+		<property name="queueCapacity" value="1000" />
+	</bean>
+
+	<!-- ***************************** TASK CONFIGURATION - SINAPSARCHIVE ***************************** -->
+
+	<bean id="sinapsArchiveLoader"
+		class="com.ikinokta.sinapsbatch.sinapsarchive.SinapsArchiveLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+		<property name="days" value="8" />
+	</bean>
+
+	<bean id="sinapsArchiveUpdater"
+		class="com.ikinokta.sinapsbatch.sinapsarchive.SinapsArchiveUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+		<property name="days" value="8" />
+	</bean>
+
+	<bean id="sinapsArchiveSender"
+		class="com.ikinokta.sinapsbatch.sinapsarchive.SinapsArchiveCreator"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+
+	<bean id="sinapsArchiveProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="sinapsArchiveExecutor" />
+		<property name="taskLoader" ref="sinapsArchiveLoader" />
+		<property name="taskUploader" ref="sinapsArchiveUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="sinapsArchiveSender" />
+	</bean>
+
+	<bean id="sinapsArchiveExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="10" />
+		<property name="maxPoolSize" value="100" />
+		<property name="queueCapacity" value="100000" />
+	</bean>
+
+	<bean id="sinapsArchiveMultiDayProcessor"
+		class="com.ikinokta.sinapsbatch.sinapsarchive.SinapsArchiveProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="sinapsArchiveExecutor" />
+		<property name="taskLoader" ref="sinapsArchiveLoader" />
+		<property name="taskUploader" ref="sinapsArchiveUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="sinapsArchiveSender" />
+	</bean>
+
+
+	<bean id="brinksAutoEodLoader" class="com.ikinokta.sinapsbatch.brinks.BrinksLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="brinksAutoEodUpdater" class="com.ikinokta.sinapsbatch.brinks.BrinksUpdater">
+	</bean>
+
+	<bean id="brinksAutoEodSender" class="com.ikinokta.sinapsbatch.brinks.AutoEODCreator"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="brinksAutoEodProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="brinksAutoEodExecutor" />
+		<property name="taskLoader" ref="brinksAutoEodLoader" />
+		<property name="taskUploader" ref="brinksAutoEodUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="brinksAutoEodSender" />
+	</bean>
+
+	<bean id="brinksAutoEodExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="10" />
+		<property name="maxPoolSize" value="100" />
+		<property name="queueCapacity" value="100000" />
+	</bean>
+
+	<bean id="barcodeTableLoader"
+		class="com.ikinokta.sinapsbatch.barcodetable.BarcodeTableLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="barcodeTableUpdater"
+		class="com.ikinokta.sinapsbatch.barcodetable.BarcodeTableUpdater">
+	</bean>
+
+	<bean id="barcodeTableSender"
+		class="com.ikinokta.sinapsbatch.barcodetable.BarcodeTableCreator"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="barcodeTableProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="barcodeTableExecutor" />
+		<property name="taskLoader" ref="barcodeTableLoader" />
+		<property name="taskUploader" ref="barcodeTableUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="barcodeTableSender" />
+	</bean>
+
+	<bean id="barcodeTableExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="10" />
+		<property name="maxPoolSize" value="100" />
+		<property name="queueCapacity" value="100000" />
+	</bean>
+
+	<bean id="barcodeSumProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor">
+		<property name="taskExecutor" ref="barcodeSumExecutor" />
+		<property name="taskLoader" ref="barcodeSumLoader" />
+		<property name="taskUploader" ref="barcodeSumUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="barcodeSumSender" />
+	</bean>
+
+	<bean id="barcodeSumExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="10" />
+		<property name="maxPoolSize" value="100" />
+		<property name="queueCapacity" value="100000" />
+	</bean>
+
+	<bean id="barcodeSumLoader" class="com.ikinokta.sinapsbatch.barcodesum.BarcodeSumLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="barcodeSumUpdater" class="com.ikinokta.sinapsbatch.barcodesum.BarcodeSumUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="barcodeSumSender" class="com.ikinokta.sinapsbatch.barcodesum.BarcodeSumCreator"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="popupMsgProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor">
+		<property name="taskExecutor" ref="popupMsgExecutor" />
+		<property name="taskLoader" ref="popupMsgLoader" />
+		<property name="taskUploader" ref="popupMsgUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="popupMsgSender" />
+	</bean>
+
+	<bean id="popupMsgExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="10" />
+		<property name="maxPoolSize" value="100" />
+		<property name="queueCapacity" value="100000" />
+	</bean>
+
+	<bean id="popupMsgLoader" class="com.ikinokta.sinapsbatch.popupmsg.PopupMsgLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="popupMsgUpdater" class="com.ikinokta.sinapsbatch.popupmsg.PopupMsgUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="popupMsgSender" class="com.ikinokta.sinapsbatch.popupmsg.PopupMsgCreator"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="orderProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor">
+		<property name="taskExecutor" ref="orderExecutor" />
+		<property name="taskLoader" ref="orderLoader" />
+		<property name="taskUploader" ref="orderUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="orderSender" />
+	</bean>
+
+	<bean id="orderExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="10" />
+		<property name="maxPoolSize" value="100" />
+		<property name="queueCapacity" value="100000" />
+	</bean>
+
+	<bean id="orderLoader" class="com.ikinokta.sinapsbatch.order.OrderLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="orderUpdater" class="com.ikinokta.sinapsbatch.order.OrderUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="orderSender" class="com.ikinokta.sinapsbatch.order.OrderCreator"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+		<property name="mailSender" ref="mailSender" />
+	</bean>
+
+	<bean id="brinksLimitProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor">
+		<property name="taskExecutor" ref="brinksLimitExecutor" />
+		<property name="taskLoader" ref="brinksLimitLoader" />
+		<property name="taskUploader" ref="brinksLimitUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="brinksLimitSender" />
+	</bean>
+
+	<bean id="brinksLimitExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="10" />
+		<property name="maxPoolSize" value="100" />
+		<property name="queueCapacity" value="100000" />
+	</bean>
+
+	<bean id="brinksLimitLoader" class="com.ikinokta.sinapsbatch.brinkslimit.BrinksLimitLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="brinksLimitUpdater" class="com.ikinokta.sinapsbatch.brinkslimit.BrinksLimitUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="brinksLimitSender" class="com.ikinokta.sinapsbatch.brinkslimit.BrinksLimitCreator"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+
+
+
+	<bean id="moveBarcodeProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor">
+		<property name="taskExecutor" ref="moveBarcodeExecutor" />
+		<property name="taskLoader" ref="moveBarcodeLoader" />
+		<property name="taskUploader" ref="moveBarcodeUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="moveBarcodeSender" />
+	</bean>
+
+	<bean id="moveBarcodeExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="10" />
+		<property name="maxPoolSize" value="100" />
+		<property name="queueCapacity" value="100000" />
+	</bean>
+
+	<bean id="moveBarcodeLoader" class="com.ikinokta.sinapsbatch.movebarcode.MoveBarcodeLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="moveBarcodeUpdater" class="com.ikinokta.sinapsbatch.movebarcode.MoveBarcodeUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="moveBarcodeSender" class="com.ikinokta.sinapsbatch.movebarcode.MoveBarcodeCreator"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	
+
+	<bean id="discountTokenProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor">
+		<property name="taskExecutor" ref="discountTokenDeleteExecutor" />
+		<property name="taskLoader" ref="discountTokenDeleteLoader" />
+		<property name="taskUploader" ref="discountTokenDeleteUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="discountTokenDeleteSender" />
+	</bean>
+
+	<bean id="discountTokenDeleteExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="10" />
+		<property name="maxPoolSize" value="100" />
+		<property name="queueCapacity" value="100000" />
+	</bean>
+
+	<bean id="discountTokenDeleteLoader" class="com.ikinokta.sinapsbatch.discounttokens.DiscountTokenDeleteLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="discountTokenDeleteUpdater" class="com.ikinokta.sinapsbatch.discounttokens.DiscountTokenDeleteUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="discountTokenDeleteSender" class="com.ikinokta.sinapsbatch.discounttokens.DiscountTokenDeleteCreator"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	
+	<bean id="smsWebService"
+		class="org.springframework.remoting.jaxws.JaxWsPortProxyFactoryBean">
+		<property name="wsdlDocumentUrl"
+			value="https://www.jetsms.net/soap/soapsms.asmx?WSDL" />
+		<property name="serviceName" value="SMSService" />
+		<property name="portName" value="SMSServiceSoap" />
+		<property name="serviceInterface"
+			value="com.ikinokta.sinapsbatch.ws.sms.SMSWebService" />
+		<property name="namespaceUri" value="https://www.jetsms.net/soap/" />
+	</bean>
+
+	<bean id="smsService" class="com.ikinokta.sinapsbatch.utility.SMSServiceImpl">
+		<property name="webService" ref="smsWebService" />
+	</bean>
+
+
+	<bean id="discountSMSLoader" class="com.ikinokta.sinapsbatch.discountsms.DiscountSMSLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="discountSMSUpdater" class="com.ikinokta.sinapsbatch.discountsms.DiscountSMSUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="discountSMSSender" class="com.ikinokta.sinapsbatch.discountsms.DiscountSMSCreator"
+		scope="prototype">
+		<property name="smsService" ref="smsService" />
+	</bean>
+
+
+	<bean id="discountSMSProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor"
+		lazy-init="true">
+		<property name="taskExecutor" ref="discountSMSExecutor" />
+		<property name="taskLoader" ref="discountSMSLoader" />
+		<property name="taskUploader" ref="discountSMSUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="discountSMSSender" />
+	</bean>
+
+
+	<bean id="discountSMSExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="10" />
+		<property name="maxPoolSize" value="100" />
+		<property name="queueCapacity" value="100000" />
+	</bean>
+	
+	<bean id="pgTermPriceProcessor" class="com.ikinokta.sinapsbatch.core.TaskProcessor">
+		<property name="taskExecutor" ref="pgTermPriceExecutor" />
+		<property name="taskLoader" ref="pgTermPriceLoader" />
+		<property name="taskUploader" ref="pgTermPriceUpdater" />
+		<lookup-method name="getNewConfirmationTaskSender" bean="pgTermPriceSender" />
+	</bean>
+
+	<bean id="pgTermPriceExecutor"
+		class="org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor">
+		<property name="corePoolSize" value="10" />
+		<property name="maxPoolSize" value="100" />
+		<property name="queueCapacity" value="100000" />
+	</bean>
+
+	<bean id="pgTermPriceLoader" class="com.ikinokta.sinapsbatch.pgtermprice.PGTermPriceLoader">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="pgTermPriceUpdater" class="com.ikinokta.sinapsbatch.pgtermprice.PGTermPriceUpdater">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+
+	<bean id="pgTermPriceSender" class="com.ikinokta.sinapsbatch.pgtermprice.PGTermPriceCreator"
+		scope="prototype">
+		<property name="sinapsDao" ref="sinapsDAO" />
+	</bean>
+	
+</beans>
